@@ -1,0 +1,266 @@
+﻿<!DOCTYPE html>
+<html lang="en" xmlns="http://www.w3.org/1999/html">
+<head>
+    <meta charset="UTF-8">
+    <title>Test</title>
+    <script type="text/javascript" src="https://alcdn.msauth.net/browser/2.28.1/js/msal-browser.min.js"></script>
+</head>
+
+<body>
+
+<div>
+    <div>
+        <p id="loginStatus"></p>
+        <input type="button" id="btnLogin" value="Login" style="display: block"/>
+        <input type="button" id="btnLogout" value="Logout" style="display: none"/>
+    </div>
+
+    <hr/>
+
+    <div id="loggedInSection" style="display: none">
+        <input type="button" id="btnInfo" value="Call Graph Directly"/>
+        <pre id="profile"></pre>
+        <input type="button" id="clearProfile" value="Clear"/>
+        
+        <hr/>
+        
+        <input type="button" id="btnApi" value="Call Web API + Graph OBO"/>
+        <pre id="apiProfile"></pre>
+        <input type="button" id="clearApiProfile" value="Clear"/>
+        
+    </div>
+</div>
+
+<script>
+    const glob = {
+        loginRequest: {
+            scopes: ["User.ReadWrite"],
+        }
+    };
+
+    window.onload = async () =>  {
+        document.getElementById("btnLogin").onclick = onLogin;
+        document.getElementById("btnLogout").onclick = onLogout;
+        document.getElementById("btnInfo").onclick = onInfo;
+        document.getElementById("btnApi").onclick = onApiProfile;
+        document.getElementById("clearProfile").onclick = () => document.getElementById("profile").innerText = "";
+        document.getElementById("clearApiProfile").onclick = () => document.getElementById("apiProfile").innerText = "";
+        
+        glob.loginStatusElem = document.getElementById("loginStatus");
+
+        const config = {
+            auth: {
+                clientId: 'a4731f49-7b43-49b4-a750-5917613b9e86',
+                authority: 'https://login.microsoftonline.com/7e2a8d3c-6142-4a02-9ad3-bd76aa5bdb76',
+                redirect: 'https://localhost:5001/index.html',
+                postLogoutRedirectUri: 'https://localhost:5001/index.html',
+            },
+            cache: {
+                cacheLocation: "sessionStorage",
+                storeAuthStateInCookie: false,
+            },
+            system: {
+                loggerOptions: {
+                    logLevel: msal.LogLevel.Warning,
+                    loggerCallback: (level, message, containsPii) => {
+                        if (containsPii) {
+                            return;
+                        }
+                        switch (level) {
+                            case msal.LogLevel.Error:
+                                console.error(message);
+                                return;
+                            case msal.LogLevel.Info:
+                                console.info(message);
+                                return;
+                            case msal.LogLevel.Verbose:
+                                console.debug(message);
+                                return;
+                            case msal.LogLevel.Warning:
+                                console.warn(message);
+                                return;
+                            default:
+                                console.log(message);
+                                return;
+                        }
+                    }
+                }
+            },
+        };
+
+        glob.client = new msal.PublicClientApplication(config);
+
+        await loginSilently();        
+    };
+    
+    async function loginSilently(){
+        console.log("Logging in silently...");
+        glob.loginStatusElem.innerText = "Logging in silently...";
+        
+        let loginResponse={};
+        try {
+            loginResponse = await glob.client.ssoSilent(glob.loginRequest);
+        }
+        catch (e) {
+            glob.loginStatusElem.innerText = "Failed to log in silently";
+            return;
+        }
+        
+        console.log("Logged in silently");
+        glob.loginStatusElem.innerText = "Logged in silently"
+        
+        postLogin(loginResponse);    
+    }
+
+    async function onLogin() {
+        glob.loginStatusElem.innerText = "Logging in interactively..."
+        let loginResponse = {};
+        try {
+            loginResponse = await glob.client.loginPopup(glob.loginRequest);
+        }
+        catch (e) {
+            glob.loginStatusElem.innerText = "Failed to log in interactively"
+            return;
+        }
+
+        glob.loginStatusElem.innerText = "Logged in interactively"
+        
+        postLogin(loginResponse);
+    }
+    
+    function postLogin(loginResponse){
+        glob.account = loginResponse.account;
+        glob.client.setActiveAccount(loginResponse.account);
+
+        document.getElementById("loggedInSection").style.display = "block";
+        document.getElementById("btnLogout").style.display = "block";
+        document.getElementById("btnLogin").style.display = "none";
+    }
+
+    async function onLogout() {
+        glob.loginStatusElem.innerText = "Logging out..."
+        
+        try {
+            await glob.client.logoutPopup({
+                    account: glob.account,
+                    postLogoutRedirectUri: "https://localhost:5001/index.html",
+                    logoutHint: glob.account?.idTokenClaims?.login_hint ?? glob.account?.username,
+                }
+            );
+        }
+        catch (e) {
+            glob.loginStatusElem.innerText = "Failed to log out";
+            return;
+        }
+
+        glob.loginStatusElem.innerText = "Logged out successfully"
+        
+        document.getElementById("btnLogout").style.display = "none";
+        document.getElementById("btnLogin").style.display = "block";
+        
+        const info = document.getElementById("loggedInSection");
+        info.style.display = "none";
+    }
+
+    async function onInfo() {
+        const dataElem = document.getElementById("profile");
+        
+        console.log("Acquiring a token for Graph...")
+        dataElem.innerText = "Acquiring a token...";
+        
+        let accessToken = await getAccessToken();
+        if (!accessToken) {
+            dataElem.innerText = "Failed to acquire a token";
+            return;
+        }
+
+        const headers = new Headers();
+        const bearer = `Bearer ${accessToken}`;
+        headers.append("Authorization", bearer);
+        const options = {
+            method: "GET",
+            headers: headers
+        };
+
+        console.log('Requesting Graph API...');
+        dataElem.innerText = "Calling...";
+
+        let response = {};
+        try {
+            response = await fetch("https://graph.microsoft.com/v1.0/me", options);
+        } catch (error) {
+            console.error(error);
+            dataElem.innerText = "Error " + response.status + " " + response.statusText;
+            return;
+        }
+
+        dataElem.innerText = JSON.stringify(await response.json(), null, "\r");
+    }
+    
+    async function getAccessToken(scopes){
+        let tokenResponse = {};
+        const request = {
+            scopes: scopes ?? glob.loginRequest.scopes
+        };
+
+        try {
+            tokenResponse = await glob.client.acquireTokenSilent(request);
+        } catch (error) {
+            console.log("silent token acquisition fails.");
+
+            if (error instanceof msal.InteractionRequiredAuthError) {
+                console.log("acquiring token using popup");
+
+                try {
+                    tokenResponse = glob.client.acquireTokenPopup(request);
+                } catch (popupError) {
+                    console.error(popupError);
+                    return null;
+                }
+            } else {
+                console.error(error);
+                return null;
+            }
+        }
+
+        return tokenResponse?.accessToken;
+    }
+    
+    async function onApiProfile(){
+        const dataElem = document.getElementById("apiProfile");
+
+        console.log("Acquiring a token for Web API...")
+        dataElem.innerText = "Acquiring a token...";
+        
+        let accessToken = await getAccessToken(["api://cc7763d5-a212-4672-9eac-2ac401f241fb/.default", "offline_access"]);
+        if (!accessToken) {
+            dataElem.innerText = "Failed to acquire a token";
+            return;
+        }
+        
+        const headers = new Headers();
+        const bearer = `Bearer ${accessToken}`;
+        headers.append("Authorization", bearer);
+        const options = {
+            method: "GET",
+            headers: headers
+        };
+
+        console.log('Requesting Web API...');
+        dataElem.innerText = "Calling...";
+
+        let response = {};
+        try {
+            response = await fetch("https://localhost:7063/api/profile", options);
+        } catch (error) {
+            // TODO Handle incremental consent?
+            console.error(error);
+            dataElem.innerText = "Error " + response.status + " " + response.statusText;
+            return;
+        }
+
+        dataElem.innerText = JSON.stringify(await response.json(), null, "\r");
+    }
+</script>
+</body>
+</html>
