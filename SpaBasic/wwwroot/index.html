@@ -21,13 +21,18 @@
         <input type="button" id="btnInfo" value="Call Graph Directly"/>
         <pre id="profile"></pre>
         <input type="button" id="clearProfile" value="Clear"/>
-        
+
         <hr/>
-        
-        <input type="button" id="btnApi" value="Call Web API + Graph OBO"/>
+
+        <input type="button" id="btnApi" value="Call Web API => Graph OBO (as User)"/>
         <pre id="apiProfile"></pre>
         <input type="button" id="clearApiProfile" value="Clear"/>
-        
+
+        <hr/>
+
+        <input type="button" id="btnUsers" value="Call Web API => Graph as App"/>
+        <pre id="users"></pre>
+        <input type="button" id="clearUsers" value="Clear"/>
     </div>
 </div>
 
@@ -38,14 +43,19 @@
         }
     };
 
-    window.onload = async () =>  {
+    window.onload = async () => {
         document.getElementById("btnLogin").onclick = onLogin;
         document.getElementById("btnLogout").onclick = onLogout;
+
         document.getElementById("btnInfo").onclick = onInfo;
-        document.getElementById("btnApi").onclick = onApiProfile;
         document.getElementById("clearProfile").onclick = () => document.getElementById("profile").innerText = "";
+
+        document.getElementById("btnApi").onclick = onApiProfile;
         document.getElementById("clearApiProfile").onclick = () => document.getElementById("apiProfile").innerText = "";
-        
+
+        document.getElementById("btnUsers").onclick = onApiUsers;
+        document.getElementById("clearUsers").onclick = () => document.getElementById("users").innerText = "";
+
         glob.loginStatusElem = document.getElementById("loginStatus");
 
         const config = {
@@ -90,26 +100,25 @@
 
         glob.client = new msal.PublicClientApplication(config);
 
-        await loginSilently();        
+        await loginSilently();
     };
-    
-    async function loginSilently(){
+
+    async function loginSilently() {
         console.log("Logging in silently...");
         glob.loginStatusElem.innerText = "Logging in silently...";
-        
-        let loginResponse={};
+
+        let loginResponse = {};
         try {
             loginResponse = await glob.client.ssoSilent(glob.loginRequest);
-        }
-        catch (e) {
+        } catch (e) {
             glob.loginStatusElem.innerText = "Failed to log in silently";
             return;
         }
-        
+
         console.log("Logged in silently");
         glob.loginStatusElem.innerText = "Logged in silently"
-        
-        postLogin(loginResponse);    
+
+        postLogin(loginResponse);
     }
 
     async function onLogin() {
@@ -117,29 +126,32 @@
         let loginResponse = {};
         try {
             loginResponse = await glob.client.loginPopup(glob.loginRequest);
-        }
-        catch (e) {
+        } catch (e) {
             glob.loginStatusElem.innerText = "Failed to log in interactively"
             return;
         }
 
         glob.loginStatusElem.innerText = "Logged in interactively"
-        
+
         postLogin(loginResponse);
     }
-    
-    function postLogin(loginResponse){
+
+    function postLogin(loginResponse) {
         glob.account = loginResponse.account;
         glob.client.setActiveAccount(loginResponse.account);
 
         document.getElementById("loggedInSection").style.display = "block";
         document.getElementById("btnLogout").style.display = "block";
         document.getElementById("btnLogin").style.display = "none";
+
+        document.getElementById("profile").innerText = "";
+        document.getElementById("apiProfile").innerText = "";
+        document.getElementById("users").innerText = "";
     }
 
     async function onLogout() {
         glob.loginStatusElem.innerText = "Logging out..."
-        
+
         try {
             await glob.client.logoutPopup({
                     account: glob.account,
@@ -147,27 +159,26 @@
                     logoutHint: glob.account?.idTokenClaims?.login_hint ?? glob.account?.username,
                 }
             );
-        }
-        catch (e) {
+        } catch (e) {
             glob.loginStatusElem.innerText = "Failed to log out";
             return;
         }
 
         glob.loginStatusElem.innerText = "Logged out successfully"
-        
+
         document.getElementById("btnLogout").style.display = "none";
         document.getElementById("btnLogin").style.display = "block";
-        
+
         const info = document.getElementById("loggedInSection");
         info.style.display = "none";
     }
 
     async function onInfo() {
         const dataElem = document.getElementById("profile");
-        
+
         console.log("Acquiring a token for Graph...")
         dataElem.innerText = "Acquiring a token...";
-        
+
         let accessToken = await getAccessToken();
         if (!accessToken) {
             dataElem.innerText = "Failed to acquire a token";
@@ -190,14 +201,17 @@
             response = await fetch("https://graph.microsoft.com/v1.0/me", options);
         } catch (error) {
             console.error(error);
-            dataElem.innerText = "Error " + response.status + " " + response.statusText;
             return;
         }
 
-        dataElem.innerText = JSON.stringify(await response.json(), null, "\r");
+        if (!response.ok) {
+            dataElem.innerText = "Error " + response.status + " " + response.statusText;
+        } else {
+            dataElem.innerText = JSON.stringify(await response.json(), null, "\r");
+        }
     }
-    
-    async function getAccessToken(scopes){
+
+    async function getAccessToken(scopes) {
         let tokenResponse = {};
         const request = {
             scopes: scopes ?? glob.loginRequest.scopes
@@ -225,19 +239,19 @@
 
         return tokenResponse?.accessToken;
     }
-    
-    async function onApiProfile(){
+
+    async function onApiProfile() {
         const dataElem = document.getElementById("apiProfile");
 
         console.log("Acquiring a token for Web API...")
         dataElem.innerText = "Acquiring a token...";
-        
-        let accessToken = await getAccessToken(["api://cc7763d5-a212-4672-9eac-2ac401f241fb/.default", "offline_access"]);
+
+        let accessToken = await getAccessToken(["api://cc7763d5-a212-4672-9eac-2ac401f241fb/.default"]);
         if (!accessToken) {
             dataElem.innerText = "Failed to acquire a token";
             return;
         }
-        
+
         const headers = new Headers();
         const bearer = `Bearer ${accessToken}`;
         headers.append("Authorization", bearer);
@@ -255,11 +269,53 @@
         } catch (error) {
             // TODO Handle incremental consent?
             console.error(error);
-            dataElem.innerText = "Error " + response.status + " " + response.statusText;
             return;
         }
 
-        dataElem.innerText = JSON.stringify(await response.json(), null, "\r");
+        if (!response.ok) {
+            dataElem.innerText = "Error " + response.status + " " + response.statusText;
+        } else {
+            dataElem.innerText = JSON.stringify(await response.json(), null, "\r");
+        }
+    }
+
+    async function onApiUsers() {
+        const dataElem = document.getElementById("users");
+
+        console.log("Acquiring a token for Web API...")
+        dataElem.innerText = "Acquiring a token...";
+
+        let accessToken = await getAccessToken(["api://cc7763d5-a212-4672-9eac-2ac401f241fb/.default"]);
+        if (!accessToken) {
+            dataElem.innerText = "Failed to acquire a token";
+            return;
+        }
+
+        const headers = new Headers();
+        const bearer = `Bearer ${accessToken}`;
+        headers.append("Authorization", bearer);
+        const options = {
+            method: "GET",
+            headers: headers
+        };
+
+        console.log('Requesting Web API...');
+        dataElem.innerText = "Calling...";
+
+        let response = {};
+        try {
+            response = await fetch("https://localhost:7063/api/users", options);
+        } catch (error) {
+            // TODO Handle incremental consent?
+            console.error(error);
+            return;
+        }
+
+        if (!response.ok) {
+            dataElem.innerText = "Error " + response.status + " " + response.statusText;
+        } else {
+            dataElem.innerText = JSON.stringify(await response.json(), null, "\r");
+        }
     }
 </script>
 </body>
