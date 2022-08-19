@@ -33,7 +33,7 @@ public class ProfileController : ControllerBase
 
         await FillNames(result, apiHelper);
         
-        await FillTaskLists(result, apiHelper);
+        await FillGroups(result, apiHelper);
 
         return result;
     }
@@ -60,12 +60,12 @@ public class ProfileController : ControllerBase
             using var doc = JsonDocument.Parse(json);
             if (doc.RootElement.TryGetProperty("givenName", out var givenNameProp))
             {
-                result.GivenName = givenNameProp.GetString();
+                result.GivenNameFromGraph = givenNameProp.GetString();
             }
 
             if (doc.RootElement.TryGetProperty("surname", out var surnameProp))
             {
-                result.Surname = surnameProp.GetString();
+                result.SurnameFromGraph = surnameProp.GetString();
             }
         }
         catch (MicrosoftIdentityWebChallengeUserException ex)
@@ -84,7 +84,7 @@ public class ProfileController : ControllerBase
         }
     }
     
-    private async Task FillTaskLists(ProfileData result, IDownstreamWebApi apiHelper)
+    private async Task FillGroups(ProfileData result, IDownstreamWebApi apiHelper)
     {
         var scopes = new[] { "Directory.Read.All" };
 
@@ -113,7 +113,7 @@ public class ProfileController : ControllerBase
                     items.Add(name ?? "* Unnamed");
                 }
 
-                result.Groups = items.ToArray();
+                result.GroupsFromGraph = items.ToArray();
             }
         }
         catch (MicrosoftIdentityWebChallengeUserException ex)
